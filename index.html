@@ -340,9 +340,9 @@ body:not(.em-jogo) {
 const app = document.querySelector('#app');
 const dialogo = document.querySelector('#vitoria');
 const niveis = [
-  { nome: 'Fácil', pares: 6, colunas: 4 },
-  { nome: 'Médio', pares: 8, colunas: 4 },
-  { nome: 'Difícil', pares: 12, colunas: 6 },
+  { nome: 'Fácil', pares: 3, colunas: 3 },
+  { nome: 'Médio', pares: 6, colunas: 4 },
+  { nome: 'Difícil', pares: 9, paresTablet: 8, colunas: 6 },
 ];
 
 const tituloPuzzle = 'Quebra-cabeças do Igaru';
@@ -415,6 +415,19 @@ function menu() {
   `);
 }
 
+// Usa a mesma faixa de tela em que o quebra-cabeças adota o layout de tablet.
+const telaTablet = matchMedia('(621px <= width <= 1180px), (621px <= width <= 1366px) and (pointer: coarse)');
+
+function paresDeMemoria(nivel) {
+  return telaTablet.matches && nivel.paresTablet ? nivel.paresTablet : nivel.pares;
+}
+
+telaTablet.addEventListener('change', () => {
+  app.querySelectorAll('[data-nivel]').forEach(botao => {
+    botao.querySelector('small').textContent = `${paresDeMemoria(niveis[botao.dataset.nivel])} pares`;
+  });
+});
+
 function escolherNivel(ePuzzle = false) {
   const opcoes = ePuzzle ? niveisPuzzle : niveis;
   mostrar(`
@@ -424,7 +437,7 @@ function escolherNivel(ePuzzle = false) {
     <div class="niveis${ePuzzle ? ' niveis-puzzle' : ''}">${opcoes.map((nivel, i) => `
       <button class="nivel" data-${ePuzzle ? 'puzzle' : 'nivel'}="${i}">
         <strong>${nivel.nome}</strong>
-        <small>${ePuzzle ? `${nivel.colunas * nivel.linhas} peças` : `${nivel.pares} pares`}</small>
+        <small>${ePuzzle ? `${nivel.colunas * nivel.linhas} peças` : `${paresDeMemoria(nivel)} pares`}</small>
       </button>
     `).join('')}</div>
   `, true);
@@ -461,7 +474,8 @@ function medirGrade(total, largura, altura, espaco) {
 
 function jogarMemoria(indiceNivel) {
   const nivel = niveis[indiceNivel];
-  const artes = artesCartas.slice(0, nivel.pares);
+  const totalPares = paresDeMemoria(nivel);
+  const artes = artesCartas.slice(0, totalPares);
   const cartas = embaralhar([...artes, ...artes]);
   let primeira = null;
   let jogadas = 0;
@@ -473,7 +487,7 @@ function jogarMemoria(indiceNivel) {
     <section class="memoria" aria-label="Jogo da memória, nível ${nivel.nome}">
       <div class="barra">
         ${voltar}
-        <span class="dado dado-icone" title="Pares encontrados"><span class="rotulo-progresso">Pares encontrados</span>${paresIcone}<strong id="pares">0/${nivel.pares}</strong></span>
+        <span class="dado dado-icone" title="Pares encontrados"><span class="rotulo-progresso">Pares encontrados</span>${paresIcone}<strong id="pares">0/${totalPares}</strong></span>
         <span class="dado dado-icone" title="Tempo de partida"><span class="rotulo-progresso">Tempo de partida</span>${cronometroIcone}<strong id="tempo">0:00</strong></span>
         ${reiniciar}
       </div>
@@ -549,8 +563,8 @@ function jogarMemoria(indiceNivel) {
       primeira = null;
       espera = null;
       resultado.textContent = combinou ? 'Par encontrado!' : 'Tente outra combinação.';
-      if (combinou) app.querySelector('#pares').textContent = `${++pares}/${nivel.pares}`;
-      if (pares === nivel.pares) {
+      if (combinou) app.querySelector('#pares').textContent = `${++pares}/${totalPares}`;
+      if (pares === totalPares) {
         clearInterval(relogio);
         atualizarTempo();
         vitoria('Todos os pares!', `Você encontrou os ${pares} pares em ${jogadas} jogadas. Tempo de partida: ${tempo.textContent}.`, () => jogarMemoria(indiceNivel));
@@ -773,11 +787,30 @@ const sons = {
 };
 let audio;
 
-async function tocarSom(efeito) {
+// O Safari pode exigir que a retomada do áudio aconteça dentro do toque.
+document.addEventListener('click', (evento) => {
+  if (!evento.target.closest('button') || audio?.state === 'running') return;
+  const Contexto = window.AudioContext || window.webkitAudioContext;
+  if (!Contexto) return;
+
   try {
-    const Contexto = window.AudioContext || window.webkitAudioContext;
-    if (!Contexto || (efeito === 'foco' && audio?.state !== 'running')) return;
-    audio ??= new Contexto();
+    const sessao = navigator.audioSession;
+    if (sessao && sessao.type !== 'playback') sessao.type = 'playback';
+  } catch {
+    // A sessão de mídia é opcional.
+  }
+
+  try {
+    if (!audio || audio.state === 'closed') audio = new Contexto();
+    if (audio.state !== 'running') audio.resume().catch(() => {});
+  } catch {
+    // O jogo continua disponível caso o navegador bloqueie o áudio.
+  }
+}, { capture: true });
+
+async function tocarSom(efeito) {
+  if (!audio || (efeito === 'foco' && audio.state !== 'running')) return;
+  try {
     if (audio.state !== 'running') await audio.resume();
     const { notas, duracao, volume } = sons[efeito];
     const inicio = audio.currentTime + (efeito === 'vitoria' ? .18 : 0);
